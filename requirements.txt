@@ -1,0 +1,29 @@
+# Virtual Memory System Simulator - Requirements
+
+# Core Python libraries (usually included with Python installation)
+# tkinter - GUI framework for the application interface
+# No additional installation needed for tkinter as it comes with Python
+
+# The application uses only Python standard library modules:
+# - tkinter (GUI framework)
+# - random (for random memory access simulation)
+# - time (for timestamps and simulation timing)
+# - threading (for background simulation)
+# - collections (deque for FIFO queue implementation)
+# - dataclasses (for Page and Frame data structures)
+# - typing (for type hints)
+
+# Python version requirement
+# Python >= 3.6
+
+# Note: This application is designed to work with Python's standard library only
+# to ensure maximum compatibility and ease of deployment.
+
+# For development and testing (optional):
+# pytest>=6.0.0
+# black>=21.0.0
+# flake8>=3.8.0
+
+# If you want to package the application (optional):
+# pyinstaller>=4.0
+# cx-Freeze>=6.0
