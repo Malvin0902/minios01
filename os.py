@@ -425,6 +425,24 @@ class VirtualMemoryGUI:
         self.log_text.configure(yscrollcommand=log_scroll.set)
         self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # --- Batch access input with entry fields ---
+        batch_frame = ttk.LabelFrame(main_frame, text="Batch Memory Access Simulation")
+        batch_frame.pack(fill=tk.X, pady=(10, 0))
+
+        ttk.Label(batch_frame, text="Process ID:").pack(side=tk.LEFT)
+        self.batch_proc_var = tk.StringVar()
+        ttk.Entry(batch_frame, textvariable=self.batch_proc_var, width=5).pack(side=tk.LEFT, padx=2)
+        ttk.Label(batch_frame, text="Virtual Address:").pack(side=tk.LEFT)
+        self.batch_addr_var = tk.StringVar()
+        ttk.Entry(batch_frame, textvariable=self.batch_addr_var, width=10).pack(side=tk.LEFT, padx=2)
+        ttk.Button(batch_frame, text="Add", command=self.add_batch_access).pack(side=tk.LEFT, padx=5)
+
+        self.batch_list = []
+        self.batch_listbox = tk.Listbox(batch_frame, height=4, width=40)
+        self.batch_listbox.pack(side=tk.LEFT, padx=5)
+        ttk.Button(batch_frame, text="Simulate Batch Access", command=self.simulate_batch_access).pack(side=tk.LEFT, padx=5)
+
     
     def create_process(self):
         """Create a new process"""
@@ -717,6 +735,28 @@ Page Size: {self.vm_system.page_size} bytes"""
         timestamp = time.strftime("%H:%M:%S")
         self.log_text.insert(tk.END, f"[{timestamp}] {message}\n")
         self.log_text.see(tk.END)
+    
+    def add_batch_access(self):
+        """Add a single access to the batch list"""
+        try:
+            process_id = int(self.batch_proc_var.get())
+            virtual_addr = int(self.batch_addr_var.get())
+            self.batch_list.append((process_id, virtual_addr))
+            self.batch_listbox.insert(tk.END, f"{process_id}, {virtual_addr}")
+            self.batch_proc_var.set("")
+            self.batch_addr_var.set("")
+        except ValueError:
+            messagebox.showerror("Error", "Invalid input for process ID or virtual address")
+
+    def simulate_batch_access(self):
+        """Simulate a batch of memory accesses from the batch list"""
+        algorithm = self.algorithm_var.get()
+        for process_id, virtual_addr in self.batch_list:
+            success, message = self.vm_system.access_memory(process_id, virtual_addr, algorithm)
+            self.log(message if success else f"ERROR: {message}")
+        self.batch_list.clear()
+        self.batch_listbox.delete(0, tk.END)
+        self.update_display()
     
     def run(self):
         """Run the GUI application"""
