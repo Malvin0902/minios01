@@ -203,11 +203,20 @@ class VirtualMemorySystem:
             return 0
     
     def _fifo_replacement(self) -> int:
-        """FIFO page replacement"""
-        if self.fifo_queue:
-            victim_frame = self.fifo_queue.popleft()
-            self.fifo_queue.append(victim_frame)
-            return victim_frame.frame_number
+        """FIFO page replacement using queue and set (classic textbook algorithm)"""
+        # Build a queue of frame numbers in FIFO order and a set for fast lookup
+        fifo_set = set()
+        fifo_queue = []
+        for frame in self.frames:
+            if frame.page is not None:
+                if frame.frame_number not in fifo_set:
+                    fifo_set.add(frame.frame_number)
+                    fifo_queue.append(frame.frame_number)
+
+        # The victim is the frame at the front of the queue (oldest loaded)
+        if fifo_queue:
+            return fifo_queue[0]
+        # Fallback: if no occupied frames, return 0
         return 0
     
     def _lru_replacement(self) -> int:
