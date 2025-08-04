@@ -327,7 +327,7 @@ class VirtualMemoryGUI:
         ttk.Entry(process_frame, textvariable=self.process_id_var, width=5).pack(side=tk.LEFT, padx=5)
         
         ttk.Label(process_frame, text="Pages:").pack(side=tk.LEFT, padx=(10, 0))
-        self.pages_var = tk.StringVar(value="4")
+        self.pages_var = tk.StringVar(value="15")  # Increased for sample patterns
         ttk.Entry(process_frame, textvariable=self.pages_var, width=5).pack(side=tk.LEFT, padx=5)
         
         ttk.Button(process_frame, text="Create Process", command=self.create_process).pack(side=tk.LEFT, padx=5)
@@ -441,8 +441,16 @@ class VirtualMemoryGUI:
         self.batch_list = []
         self.batch_listbox = tk.Listbox(batch_frame, height=4, width=40)
         self.batch_listbox.pack(side=tk.LEFT, padx=5)
-        ttk.Button(batch_frame, text="Simulate Batch Access", command=self.simulate_batch_access).pack(side=tk.LEFT, padx=5)
-        ttk.Button(batch_frame, text="Batch Compare Algorithms", command=self.batch_compare_algorithms).pack(side=tk.LEFT, padx=5)
+        
+        # Button frame for batch operations
+        batch_button_frame = ttk.Frame(batch_frame)
+        batch_button_frame.pack(side=tk.LEFT, padx=5)
+        
+        ttk.Button(batch_button_frame, text="Clear Batch", command=self.clear_batch).pack(pady=2)
+        ttk.Button(batch_button_frame, text="Add Sample Pattern", command=self.add_sample_pattern).pack(pady=2)
+        ttk.Button(batch_button_frame, text="Simulate Batch", command=self.simulate_batch_access).pack(pady=2)
+        ttk.Button(batch_button_frame, text="Compare Algorithms", command=self.batch_compare_algorithms).pack(pady=2)
+
     def batch_compare_algorithms(self):
         """Simulate the batch for all algorithms and show comparison"""
         if not self.batch_list:
@@ -450,56 +458,198 @@ class VirtualMemoryGUI:
             return
 
         import copy
+        
+        # Save the original VM state
         orig_vm = copy.deepcopy(self.vm_system)
         orig_log = self.log_text.get(1.0, tk.END)
 
         results = {}
+        detailed_logs = {}
+        
         for algorithm in ["FIFO", "LRU", "Clock"]:
-            # Reset VM to a fresh copy of the original state for each algorithm
+            # Create a fresh copy of the original VM state for each algorithm
             self.vm_system = copy.deepcopy(orig_vm)
-            # Reset algorithm-specific stats for a fair comparison
-            self.vm_system.algorithm_stats[algorithm]["memory_accesses"] = 0
-            self.vm_system.algorithm_stats[algorithm]["page_faults"] = 0
-            self.vm_system.algorithm_stats[algorithm]["hit_count"] = 0
-            # Simulate batch
-            for process_id, virtual_addr in self.batch_list:
-                self.vm_system.access_memory(process_id, virtual_addr, algorithm)
-            # Collect stats
+            
+            # Clear the log for this algorithm run
+            self.log_text.delete(1.0, tk.END)
+            
+            # Reset all algorithm stats to ensure clean comparison
+            for alg in self.vm_system.algorithm_stats:
+                self.vm_system.algorithm_stats[alg]["memory_accesses"] = 0
+                self.vm_system.algorithm_stats[alg]["page_faults"] = 0
+                self.vm_system.algorithm_stats[alg]["hit_count"] = 0
+            
+            # Reset global stats too
+            self.vm_system.memory_accesses = 0
+            self.vm_system.page_faults = 0
+            self.vm_system.hit_count = 0
+            self.vm_system.current_time = 0
+            
+            # Reset algorithm-specific state
+            self.vm_system.clock_hand = 0
+            self.vm_system.fifo_queue = deque()
+            
+            self.log(f"Starting simulation with {algorithm} algorithm")
+            self.log(f"Batch contains {len(self.batch_list)} memory accesses")
+            
+            # Simulate batch with current algorithm
+            for i, (process_id, virtual_addr) in enumerate(self.batch_list, 1):
+                success, message = self.vm_system.access_memory(process_id, virtual_addr, False, algorithm)
+                self.log(f"Access {i}: {message}")
+            
+            # Collect final stats for this algorithm
             stats = self.vm_system.algorithm_stats[algorithm]
             hit_ratio = self.vm_system.get_algorithm_hit_ratio(algorithm)
+            
+            # Also use global stats as backup
+            global_hit_ratio = self.vm_system.get_hit_ratio()
+            
             results[algorithm] = {
-                "memory_accesses": stats["memory_accesses"],
-                "page_faults": stats["page_faults"],
-                "hit_count": stats["hit_count"],
-                "hit_ratio": hit_ratio
+                "memory_accesses": max(stats["memory_accesses"], self.vm_system.memory_accesses),
+                "page_faults": max(stats["page_faults"], self.vm_system.page_faults),
+                "hit_count": max(stats["hit_count"], self.vm_system.hit_count),
+                "hit_ratio": max(hit_ratio, global_hit_ratio),
+                "final_memory_state": copy.deepcopy(self.vm_system.get_memory_map())
             }
+            
+            # Save the log for this algorithm
+            detailed_logs[algorithm] = self.log_text.get(1.0, tk.END)
+            
+            self.log(f"Final {algorithm} stats: {results[algorithm]['page_faults']} faults, {results[algorithm]['hit_ratio']:.2f}% hit ratio")
 
-        # Restore VM and log
+        # Restore original VM and log
         self.vm_system = orig_vm
         self.log_text.delete(1.0, tk.END)
         self.log_text.insert(1.0, orig_log)
         self.update_display()
 
-        # Show comparison window
+        # Show comprehensive comparison window
+        self.show_batch_comparison_window(results, detailed_logs)
+    
+    def show_batch_comparison_window(self, results, detailed_logs):
+        """Show detailed comparison window with tabs for each algorithm"""
         comparison_window = tk.Toplevel(self.root)
         comparison_window.title("Batch Algorithm Performance Comparison")
-        comparison_window.geometry("500x250")
-        text_widget = tk.Text(comparison_window, font=("Courier", 10))
-        scrollbar = ttk.Scrollbar(comparison_window, orient="vertical", command=text_widget.yview)
-        text_widget.configure(yscrollcommand=scrollbar.set)
-
+        comparison_window.geometry("800x600")
+        
+        # Create notebook for tabs
+        notebook = ttk.Notebook(comparison_window)
+        notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Summary tab
+        summary_frame = ttk.Frame(notebook)
+        notebook.add(summary_frame, text="Summary")
+        
+        summary_text = tk.Text(summary_frame, font=("Courier", 11), wrap=tk.WORD)
+        summary_scroll = ttk.Scrollbar(summary_frame, orient="vertical", command=summary_text.yview)
+        summary_text.configure(yscrollcommand=summary_scroll.set)
+        
+        # Generate comprehensive summary report
         report = "BATCH ALGORITHM PERFORMANCE COMPARISON\n"
-        report += "=" * 45 + "\n\n"
-        for algorithm in ["FIFO", "LRU", "Clock"]:
+        report += "=" * 70 + "\n\n"
+        report += f"Batch Size: {len(self.batch_list)} memory accesses\n"
+        report += f"Physical Memory Frames: {self.vm_system.physical_frames}\n"
+        report += f"Test Pattern: {self.batch_list}\n\n"
+        
+        # Calculate differences and find best/worst performers
+        algorithms = ["FIFO", "LRU", "Clock"]
+        page_faults = [results[alg]['page_faults'] for alg in algorithms]
+        hit_ratios = [results[alg]['hit_ratio'] for alg in algorithms]
+        
+        best_alg_faults = algorithms[page_faults.index(min(page_faults))]
+        worst_alg_faults = algorithms[page_faults.index(max(page_faults))]
+        best_alg_hits = algorithms[hit_ratios.index(max(hit_ratios))]
+        worst_alg_hits = algorithms[hit_ratios.index(min(hit_ratios))]
+        
+        # Algorithm comparison table
+        report += "PERFORMANCE SUMMARY:\n"
+        report += "-" * 70 + "\n"
+        report += f"{'Algorithm':<12} {'Accesses':<10} {'Faults':<8} {'Hits':<6} {'Hit Ratio':<12} {'Performance':<10}\n"
+        report += "-" * 70 + "\n"
+        
+        for algorithm in algorithms:
             r = results[algorithm]
-            report += f"{algorithm} Algorithm:\n"
-            report += f"  Memory Accesses: {r['memory_accesses']}\n"
-            report += f"  Page Faults: {r['page_faults']}\n"
-            report += f"  Page Hits: {r['hit_count']}\n"
-            report += f"  Hit Ratio: {r['hit_ratio']:.2f}%\n\n"
-        text_widget.insert(1.0, report)
-        text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            performance = ""
+            if algorithm == best_alg_faults and algorithm == best_alg_hits:
+                performance = "⭐ BEST"
+            elif algorithm == best_alg_faults:
+                performance = "👍 LOW FAULTS"
+            elif algorithm == best_alg_hits:
+                performance = "👍 HIGH HITS"
+            elif algorithm == worst_alg_faults:
+                performance = "⚠️ HIGH FAULTS"
+            
+            report += f"{algorithm:<12} {r['memory_accesses']:<10} {r['page_faults']:<8} {r['hit_count']:<6} {r['hit_ratio']:<11.2f}% {performance:<10}\n"
+        
+        report += "\n"
+        
+        # Highlight differences
+        max_fault_diff = max(page_faults) - min(page_faults)
+        max_hit_diff = max(hit_ratios) - min(hit_ratios)
+        
+        if max_fault_diff > 0 or max_hit_diff > 0:
+            report += "🔍 ALGORITHM DIFFERENCES DETECTED:\n"
+            report += f"   Page Fault Difference: {max_fault_diff} faults\n"
+            report += f"   Hit Ratio Difference: {max_hit_diff:.2f}%\n"
+            report += f"   Best Algorithm (Fewest Faults): {best_alg_faults}\n"
+            report += f"   Best Algorithm (Highest Hit Ratio): {best_alg_hits}\n\n"
+        else:
+            report += "ℹ️  All algorithms performed identically on this pattern.\n"
+            report += "   Try a pattern with more pages or different access patterns.\n\n"
+        
+        # Detailed analysis
+        report += "DETAILED ANALYSIS:\n"
+        report += "-" * 40 + "\n"
+        for algorithm in algorithms:
+            r = results[algorithm]
+            fault_rate = (r['page_faults'] / r['memory_accesses'] * 100) if r['memory_accesses'] > 0 else 0
+            
+            # Calculate efficiency compared to best
+            best_faults = min(page_faults)
+            fault_efficiency = "Perfect" if r['page_faults'] == best_faults else f"+{r['page_faults'] - best_faults} faults"
+            
+            report += f"\n{algorithm} Algorithm:\n"
+            report += f"  📊 Total Memory Accesses: {r['memory_accesses']}\n"
+            report += f"  ❌ Page Faults: {r['page_faults']} ({fault_efficiency})\n"
+            report += f"  ✅ Page Hits: {r['hit_count']}\n"
+            report += f"  📈 Hit Ratio: {r['hit_ratio']:.2f}%\n"
+            report += f"  📉 Fault Rate: {fault_rate:.2f}%\n"
+            
+            # Memory utilization
+            memory_state = r['final_memory_state']
+            used_frames = len([f for f in memory_state['frames'] if not f['is_free']])
+            utilization = (used_frames / len(memory_state['frames']) * 100) if memory_state['frames'] else 0
+            report += f"  💾 Final Memory Utilization: {utilization:.1f}%\n"
+            
+            # Algorithm-specific insights
+            if algorithm == "FIFO":
+                report += f"  🔄 FIFO: Replaces oldest loaded page\n"
+            elif algorithm == "LRU":
+                report += f"  🕐 LRU: Replaces least recently used page\n"
+            elif algorithm == "Clock":
+                report += f"  ⏰ Clock: Uses reference bit for replacement\n"
+        
+        summary_text.insert(1.0, report)
+        summary_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        summary_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Create detailed log tabs for each algorithm
+        for algorithm in ["FIFO", "LRU", "Clock"]:
+            log_frame = ttk.Frame(notebook)
+            notebook.add(log_frame, text=f"{algorithm} Details")
+            
+            log_text = tk.Text(log_frame, font=("Courier", 10), wrap=tk.WORD)
+            log_scroll = ttk.Scrollbar(log_frame, orient="vertical", command=log_text.yview)
+            log_text.configure(yscrollcommand=log_scroll.set)
+            
+            # Add algorithm-specific detailed log
+            detailed_report = f"{algorithm} ALGORITHM DETAILED LOG\n"
+            detailed_report += "=" * 40 + "\n\n"
+            detailed_report += detailed_logs.get(algorithm, "No log available")
+            
+            log_text.insert(1.0, detailed_report)
+            log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
     
     def create_process(self):
@@ -800,20 +950,133 @@ Page Size: {self.vm_system.page_size} bytes"""
             process_id = int(self.batch_proc_var.get())
             virtual_addr = int(self.batch_addr_var.get())
             self.batch_list.append((process_id, virtual_addr))
-            self.batch_listbox.insert(tk.END, f"{process_id}, {virtual_addr}")
+            self.batch_listbox.insert(tk.END, f"P{process_id}: {virtual_addr}")
             self.batch_proc_var.set("")
             self.batch_addr_var.set("")
         except ValueError:
             messagebox.showerror("Error", "Invalid input for process ID or virtual address")
 
-    def simulate_batch_access(self):
-        """Simulate a batch of memory accesses from the batch list"""
-        algorithm = self.algorithm_var.get()
-        for process_id, virtual_addr in self.batch_list:
-            success, message = self.vm_system.access_memory(process_id, virtual_addr, algorithm)
-            self.log(message if success else f"ERROR: {message}")
+    def clear_batch(self):
+        """Clear the batch list"""
         self.batch_list.clear()
         self.batch_listbox.delete(0, tk.END)
+        self.log("Batch list cleared")
+
+    def add_sample_pattern(self):
+        """Add a sample access pattern for testing algorithm differences"""
+        if not self.vm_system.processes:
+            messagebox.showwarning("Warning", "Please create at least one process first")
+            return
+            
+        # Clear existing batch
+        self.clear_batch()
+        
+        # Create patterns that will cause page faults even with 8 frames
+        # These patterns access 10+ different pages to force replacement
+        sample_patterns = [
+            # Pattern 1: Basic Sequential + Revisit (shows FIFO vs LRU difference)
+            [(1, 0), (1, 4096), (1, 8192), (1, 12288), (1, 16384), (1, 20480), 
+             (1, 24576), (1, 28672), (1, 32768), (1, 0), (1, 4096)],
+            
+            # Pattern 2: LRU-friendly - Recent pages accessed again
+            [(1, 0), (1, 4096), (1, 8192), (1, 12288), (1, 16384), (1, 20480), 
+             (1, 24576), (1, 28672), (1, 32768), (1, 32768), (1, 28672), (1, 24576), 
+             (1, 36864), (1, 40960)],
+            
+            # Pattern 3: FIFO-friendly - Old pages accessed again  
+            [(1, 0), (1, 4096), (1, 8192), (1, 12288), (1, 16384), (1, 20480), 
+             (1, 24576), (1, 28672), (1, 32768), (1, 0), (1, 4096), (1, 8192), 
+             (1, 36864), (1, 40960)],
+            
+            # Pattern 4: Working Set - Tight locality then expansion
+            [(1, 0), (1, 4096), (1, 8192), (1, 0), (1, 4096), (1, 8192), 
+             (1, 12288), (1, 16384), (1, 20480), (1, 24576), (1, 28672), 
+             (1, 0), (1, 4096), (1, 8192)],
+            
+            # Pattern 5: Mixed Access - Shows all algorithms differently
+            [(1, 0), (1, 4096), (1, 8192), (1, 12288), (1, 16384), (1, 20480), 
+             (1, 24576), (1, 28672), (1, 0), (1, 32768), (1, 4096), (1, 36864), 
+             (1, 8192), (1, 40960), (1, 0)]
+        ]
+        
+        # Simple pattern selection dialog
+        pattern_window = tk.Toplevel(self.root)
+        pattern_window.title("Select Sample Pattern")
+        pattern_window.geometry("700x400")
+        pattern_window.resizable(True, True)
+        
+        # Main frame
+        main_frame = ttk.Frame(pattern_window)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        
+        ttk.Label(main_frame, text="Choose a sample access pattern:").pack(pady=(0, 15))
+        
+        pattern_var = tk.StringVar(value="0")
+        
+        # Pattern options
+        patterns_info = [
+            ("Basic Sequential + Revisit", "11 accesses, revisits early pages", "Shows clear FIFO vs LRU difference"),
+            ("LRU-Friendly Pattern", "14 accesses, recent page reuse", "LRU should perform better with recent locality"),
+            ("FIFO-Friendly Pattern", "14 accesses, old page reuse", "FIFO may perform better with old page access"),
+            ("Working Set Pattern", "14 accesses, tight locality", "Shows working set behavior differences"),
+            ("Mixed Access Pattern", "15 accesses, varied reuse", "Complex pattern showing all algorithm differences")
+        ]
+        
+        # Create radio buttons for each pattern
+        for i, (name, details, description) in enumerate(patterns_info):
+            frame = ttk.Frame(main_frame)
+            frame.pack(fill=tk.X, pady=5)
+            
+            ttk.Radiobutton(frame, text=f"{i+1}. {name}", variable=pattern_var, 
+                           value=str(i)).pack(anchor=tk.W)
+            
+            ttk.Label(frame, text=f"   {details} - {description}").pack(anchor=tk.W)
+        
+        # Buttons
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(pady=20)
+        
+        def apply_pattern():
+            try:
+                pattern_idx = int(pattern_var.get())
+                pattern = sample_patterns[pattern_idx]
+                
+                for process_id, virtual_addr in pattern:
+                    self.batch_list.append((process_id, virtual_addr))
+                    self.batch_listbox.insert(tk.END, f"P{process_id}: {virtual_addr}")
+                
+                unique_pages = len(set(addr for _, addr in pattern))
+                self.log(f"Added sample pattern {pattern_idx + 1} with {len(pattern)} accesses")
+                self.log(f"Pattern accesses {unique_pages} unique pages (will force page faults with 8 frames)")
+                pattern_window.destroy()
+            except (ValueError, IndexError):
+                messagebox.showerror("Error", "Invalid pattern selection")
+        
+        ttk.Button(button_frame, text="Apply Pattern", command=apply_pattern).pack(side=tk.LEFT, padx=10)
+        ttk.Button(button_frame, text="Cancel", command=pattern_window.destroy).pack(side=tk.LEFT, padx=10)
+        
+        # Add instruction
+        instruction_frame = ttk.Frame(main_frame)
+        instruction_frame.pack(fill=tk.X, pady=10)
+        
+        instruction_text = "Note: Make sure to create Process 1 with at least 15 pages before using these patterns.\nThese patterns access multiple pages to demonstrate algorithm differences."
+        ttk.Label(instruction_frame, text=instruction_text, justify=tk.CENTER).pack()
+
+    def simulate_batch_access(self):
+        """Simulate a batch of memory accesses from the batch list"""
+        if not self.batch_list:
+            messagebox.showinfo("Info", "No batch accesses to simulate.")
+            return
+            
+        algorithm = self.algorithm_var.get()
+        self.log(f"Starting batch simulation with {algorithm} algorithm")
+        self.log(f"Batch contains {len(self.batch_list)} memory accesses")
+        
+        for i, (process_id, virtual_addr) in enumerate(self.batch_list, 1):
+            success, message = self.vm_system.access_memory(process_id, virtual_addr, False, algorithm)
+            self.log(f"Batch Access {i}: {message}")
+            
+        self.log(f"Batch simulation completed. Hit ratio: {self.vm_system.get_hit_ratio():.2f}%")
         self.update_display()
     
     def run(self):
