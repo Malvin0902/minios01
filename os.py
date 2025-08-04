@@ -442,6 +442,64 @@ class VirtualMemoryGUI:
         self.batch_listbox = tk.Listbox(batch_frame, height=4, width=40)
         self.batch_listbox.pack(side=tk.LEFT, padx=5)
         ttk.Button(batch_frame, text="Simulate Batch Access", command=self.simulate_batch_access).pack(side=tk.LEFT, padx=5)
+        ttk.Button(batch_frame, text="Batch Compare Algorithms", command=self.batch_compare_algorithms).pack(side=tk.LEFT, padx=5)
+    def batch_compare_algorithms(self):
+        """Simulate the batch for all algorithms and show comparison"""
+        if not self.batch_list:
+            messagebox.showinfo("Info", "No batch accesses to simulate.")
+            return
+
+        import copy
+        orig_vm = copy.deepcopy(self.vm_system)
+        orig_log = self.log_text.get(1.0, tk.END)
+
+        results = {}
+        for algorithm in ["FIFO", "LRU", "Clock"]:
+            # Reset VM to a fresh copy of the original state for each algorithm
+            self.vm_system = copy.deepcopy(orig_vm)
+            # Reset algorithm-specific stats for a fair comparison
+            self.vm_system.algorithm_stats[algorithm]["memory_accesses"] = 0
+            self.vm_system.algorithm_stats[algorithm]["page_faults"] = 0
+            self.vm_system.algorithm_stats[algorithm]["hit_count"] = 0
+            # Simulate batch
+            for process_id, virtual_addr in self.batch_list:
+                self.vm_system.access_memory(process_id, virtual_addr, algorithm)
+            # Collect stats
+            stats = self.vm_system.algorithm_stats[algorithm]
+            hit_ratio = self.vm_system.get_algorithm_hit_ratio(algorithm)
+            results[algorithm] = {
+                "memory_accesses": stats["memory_accesses"],
+                "page_faults": stats["page_faults"],
+                "hit_count": stats["hit_count"],
+                "hit_ratio": hit_ratio
+            }
+
+        # Restore VM and log
+        self.vm_system = orig_vm
+        self.log_text.delete(1.0, tk.END)
+        self.log_text.insert(1.0, orig_log)
+        self.update_display()
+
+        # Show comparison window
+        comparison_window = tk.Toplevel(self.root)
+        comparison_window.title("Batch Algorithm Performance Comparison")
+        comparison_window.geometry("500x250")
+        text_widget = tk.Text(comparison_window, font=("Courier", 10))
+        scrollbar = ttk.Scrollbar(comparison_window, orient="vertical", command=text_widget.yview)
+        text_widget.configure(yscrollcommand=scrollbar.set)
+
+        report = "BATCH ALGORITHM PERFORMANCE COMPARISON\n"
+        report += "=" * 45 + "\n\n"
+        for algorithm in ["FIFO", "LRU", "Clock"]:
+            r = results[algorithm]
+            report += f"{algorithm} Algorithm:\n"
+            report += f"  Memory Accesses: {r['memory_accesses']}\n"
+            report += f"  Page Faults: {r['page_faults']}\n"
+            report += f"  Page Hits: {r['hit_count']}\n"
+            report += f"  Hit Ratio: {r['hit_ratio']:.2f}%\n\n"
+        text_widget.insert(1.0, report)
+        text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
     
     def create_process(self):
