@@ -157,7 +157,7 @@ class VirtualMemorySystem:
             frame.page = new_page
             frame.load_time = self.current_time
             frame.last_access_time = self.current_time
-            frame.reference_bit = True
+            frame.reference_bit = False  # Page fault: reference bit starts at 0
             frame.dirty_bit = False
             
             process.page_table[page_number] = frame_number
@@ -179,7 +179,7 @@ class VirtualMemorySystem:
             victim_frame.page = new_page
             victim_frame.load_time = self.current_time
             victim_frame.last_access_time = self.current_time
-            victim_frame.reference_bit = True
+            victim_frame.reference_bit = False  # Page fault: reference bit starts at 0
             victim_frame.dirty_bit = False
             
             process.page_table[page_number] = victim_frame_index
@@ -203,20 +203,11 @@ class VirtualMemorySystem:
             return 0
     
     def _fifo_replacement(self) -> int:
-        """FIFO page replacement using queue and set (classic textbook algorithm)"""
-        # Build a queue of frame numbers in FIFO order and a set for fast lookup
-        fifo_set = set()
-        fifo_queue = []
-        for frame in self.frames:
-            if frame.page is not None:
-                if frame.frame_number not in fifo_set:
-                    fifo_set.add(frame.frame_number)
-                    fifo_queue.append(frame.frame_number)
-
-        # The victim is the frame at the front of the queue (oldest loaded)
-        if fifo_queue:
-            return fifo_queue[0]
-        # Fallback: if no occupied frames, return 0
+        """FIFO page replacement"""
+        if self.fifo_queue:
+            victim_frame = self.fifo_queue.popleft()
+            self.fifo_queue.append(victim_frame)
+            return victim_frame.frame_number
         return 0
     
     def _lru_replacement(self) -> int:
@@ -456,7 +447,6 @@ class VirtualMemoryGUI:
         batch_button_frame.pack(side=tk.LEFT, padx=5)
         
         ttk.Button(batch_button_frame, text="Clear Batch", command=self.clear_batch).pack(pady=2)
-        ttk.Button(batch_button_frame, text="Add Sample Pattern", command=self.add_sample_pattern).pack(pady=2)
         ttk.Button(batch_button_frame, text="Simulate Batch", command=self.simulate_batch_access).pack(pady=2)
         ttk.Button(batch_button_frame, text="Compare Algorithms", command=self.batch_compare_algorithms).pack(pady=2)
 
@@ -839,7 +829,9 @@ class VirtualMemoryGUI:
             else:
                 process = self.vm_system.processes[frame.page.process_id]
                 color = process.color
-                text = f"Frame {i}: P{frame.page.process_id} Page {frame.page.page_number}"
+                # Add reference bit to main display for Clock debugging
+                ref_bit = 1 if frame.reference_bit else 0
+                text = f"Frame {i}: P{frame.page.process_id} Page {frame.page.page_number} (R:{ref_bit})"
             
             self.memory_canvas.create_rectangle(
                 margin, y, margin + frame_width, y + frame_height,
@@ -848,16 +840,18 @@ class VirtualMemoryGUI:
             
             self.memory_canvas.create_text(
                 margin + frame_width // 2, y + frame_height // 2,
-                text=text, font=("Arial", 10, "bold")
+                text=text, font=("Arial", 9, "bold")
             )
             
             # Show additional info
             if frame.page is not None:
                 info_text = f"Loaded: {frame.load_time:.0f}, Accessed: {frame.last_access_time:.0f}"
-                if frame.reference_bit:
-                    info_text += ", R"
+                # Show reference bit as 1/0 for debugging Clock algorithm
+                ref_bit = 1 if frame.reference_bit else 0
+                info_text += f", R:{ref_bit}"
                 if frame.dirty_bit:
-                    info_text += ", D"
+                    dirty_bit = 1 if frame.dirty_bit else 0
+                    info_text += f", D:{dirty_bit}"
                 
                 self.memory_canvas.create_text(
                     margin + frame_width // 2, y + frame_height + 5,
@@ -942,7 +936,11 @@ Active Processes: {len(self.vm_system.processes)}
 Total Pages: {sum(p.pages for p in self.vm_system.processes.values())}
 Current Algorithm: {self.algorithm_var.get()}
 Current Time: {self.vm_system.current_time}
-Page Size: {self.vm_system.page_size} bytes"""
+Page Size: {self.vm_system.page_size} bytes
+
+CLOCK ALGORITHM DEBUG:
+Clock Hand Position: {self.vm_system.clock_hand}
+Reference Bits: {[1 if f.reference_bit else 0 for f in self.vm_system.frames if f.page is not None]}"""
         
         self.stats_text.delete(1.0, tk.END)
         self.stats_text.insert(1.0, stats)
