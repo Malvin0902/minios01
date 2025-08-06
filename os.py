@@ -314,6 +314,8 @@ class VirtualMemoryGUI:
         main_frame = ttk.Frame(self.root)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
+        # (Info label moved to batch section below)
+
         # Control panel
         control_frame = ttk.LabelFrame(main_frame, text="Control Panel")
         control_frame.pack(fill=tk.X, pady=(0, 10))
@@ -429,6 +431,10 @@ class VirtualMemoryGUI:
         # --- Batch access input with entry fields ---
         batch_frame = ttk.LabelFrame(main_frame, text="Batch Memory Access Simulation")
         batch_frame.pack(fill=tk.X, pady=(10, 0))
+
+        # Info label for simulation usage (now in batch section)
+        info_label = ttk.Label(batch_frame, text="Please reset system before you want to use Start Simulation feature and create a new process for more accurate result", foreground="red", font=("Arial", 10, "bold"))
+        info_label.pack(fill=tk.X, pady=(0, 8))
 
         ttk.Label(batch_frame, text="Process ID:").pack(side=tk.LEFT)
         self.batch_proc_var = tk.StringVar()
